@@ -1,75 +1,95 @@
-import os
 import requests
+import json
 
-FIREBASE_URL = os.environ.get("FIREBASE_URL")
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-OPENWEATHER_API_KEY = os.environ.get("OPENWEATHER_API_KEY")
+# --- CONFIGURATION ---
+FIREBASE_DATABASE_URL = "https://heatriskapp-default-rtdb.firebaseio.com"  # Base URL without trailing slash
+OPENWEATHER_API_KEY = "YOUR_OPENWEATHER_API_KEY"
+TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+CHAT_ID = "6225843135"
 
-def get_city_heat_index(city_name):
-    url = f"https://api.openweathermap.org/data/2.5/weather?q={city_name}&appid={OPENWEATHER_API_KEY}&units=metric"
-    response = requests.get(url).json()
+def get_firebase_user_data(chat_id):
+    """
+    Fetches ["Dumaguete", "31"] stored under the Chat ID node in Firebase.
+    """
+    url = f"{FIREBASE_DATABASE_URL}/{chat_id}.json"
+    response = requests.get(url)
     
-    if response.get("cod") == 200:
-        temp = response["main"]["temp"]
-        feels_like = response["main"]["feels_like"]
-        return max(temp, feels_like)
+    if response.status_code == 200 and response.json():
+        # Firebase returns JSON string array: ["Dumaguete", "31"]
+        data = response.json()
+        city = data[0]
+        threshold = float(data[1])
+        return city, threshold
     else:
-        print(f"Failed to fetch weather for {city_name}: {response.get('message')}")
-        return None
+        print("Failed to fetch data from Firebase.")
+        return None, None
 
-def send_telegram_alert(chat_id, city, temp, threshold):
-    message = (
-        f"⚠️ *HEAT RISK ALERT*\n\n"
-        f"📍 *Location:* {city}\n"
-        f"🌡️ *Current Heat Index:* {temp:.1f}°C\n"
-        f"🎯 *Your Set Threshold:* {threshold:.1f}°C\n\n"
-        f"Stay hydrated and take necessary precautions!"
-    )
+def get_live_weather(city_name):
+    """
+    Queries OpenWeatherMap API for live temperature in Celsius.
+    """
+    url = f"https://api.openweathermap.org/data/2.5/weather?q={city_name}&units=metric&appid={OPENWEATHER_API_KEY}"
+    response = requests.get(url)
+    
+    if response.status_code == 200:
+        weather_data = response.json()
+        temp = weather_data["main"]["temp"]
+        feels_like = weather_data["main"]["feels_like"]
+        return temp, feels_like
+    else:
+        print(f"Error fetching weather from OpenWeatherMap: {response.status_code}")
+        return None, None
+
+def send_telegram_notification(chat_id, message):
+    """
+    Sends message to Telegram user via Bot API.
+    """
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": message,
         "parse_mode": "Markdown"
     }
-    requests.post(url, data=payload)
+    response = requests.post(url, json=payload)
+    return response.json()
 
-def main():
-    if not FIREBASE_URL or not TELEGRAM_BOT_TOKEN or not OPENWEATHER_API_KEY:
-        print("Missing required environment secrets.")
+def check_and_notify():
+    # 1. Read from Firebase
+    city, threshold = get_firebase_user_data(CHAT_ID)
+    if not city or threshold is None:
         return
 
-    db_url = FIREBASE_URL.rstrip('/') + '/.json'
-    response = requests.get(db_url)
-    if response.status_code != 200 or not response.json():
-        print("No user data found in Firebase.")
+    # 2. Get OpenWeather data
+    current_temp, feels_like = get_live_weather(city)
+    if current_temp is None:
         return
 
-    data = response.json()
+    # 3. Format message depending on threshold condition
+    if current_temp >= threshold:
+        header = "⚠️ *HEAT RISK WARNING!*"
+        status = "🚨 *Status:* Threshold reached or exceeded! Take precautions."
+    else:
+        header = "ℹ️ *Routine Temperature Update*"
+        status = "✅ *Status:* Conditions are safe (below threshold)."
 
-    # Handle both nested 'users' structure from App Inventor and root structure
-    users_data = data.get("users", data) if isinstance(data, dict) else data
+    # Construct complete update text
+    message = (
+        f"{header}\n\n"
+        f"📍 *Location:* {city}\n"
+        f"🌡️ *Current Temp:* {current_temp}°C\n"
+        f"☀️ *Feels Like:* {feels_like}°C\n"
+        f"🎯 *Set Threshold:* {threshold}°C\n\n"
+        f"{status}"
+    )
 
-    for chat_id, user_info in users_data.items():
-        try:
-            # Handle list layout saved from App Inventor [City, Threshold]
-            if isinstance(user_info, list) and len(user_info) >= 2:
-                city = user_info[0]
-                threshold = float(user_info[1])
-            elif isinstance(user_info, dict):
-                city = user_info.get("city")
-                threshold = float(user_info.get("threshold", 0))
-            else:
-                continue
+    # 4. ALWAYS send notification to Telegram
+    res = send_telegram_notification(CHAT_ID, message)
+    if res.get("ok"):
+        print("Telegram notification sent successfully!")
+    else:
+        print(f"Failed to send Telegram message: {res}")
 
-            current_temp = get_city_heat_index(city)
-            
-            if current_temp is not None:
-                print(f"User {chat_id} ({city}): Current = {current_temp}°C, Threshold = {threshold}°C")
-                if current_temp >= threshold:
-                    print(f"Sending alert to {chat_id}...")
-                    send_telegram_alert(chat_id, city, current_temp, threshold)
-        except Exception as e:
-            print(f"Error evaluating user {chat_id}: {e}")
-
+# Run function
 if __name__ == "__main__":
-    main()
+    check_and_notify()
+    
