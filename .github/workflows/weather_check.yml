@@ -22,4 +22,4 @@ jobs:
         run: pip install requests
 
       - name: Run Heat Risk Script
-        run: python heat_risk_bot.py
+        run: python heat_monitor.py
