@@ -1,0 +1,35 @@
+name: Heat Index Alert
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  check-heat-index:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write Firebase credentials file
+        run: echo "$FIREBASE_CRED_JSON" > firebase-cred.json
+        env:
+          FIREBASE_CRED_JSON: ${{ secrets.FIREBASE_CRED_JSON }}
+
+      - name: Run heat monitor script
+        run: python heat_monitor.py
+        env:
+          FIREBASE_CRED_PATH: firebase-cred.json
+          FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
+          OWM_API_KEY: ${{ secrets.OWM_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
