@@ -1,25 +1,30 @@
-name: Negros Oriental Heat Index Bulletin
+name: Heat Index Alert
 
 on:
   schedule:
-    # Runs every 3 hours (Cron syntax in UTC)
-    - cron: '0 */3 * * *'
-  workflow_dispatch: # Allows manual trigger button in GitHub
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
 
 jobs:
-  run-bot:
+  check-heat-index:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v3
+      - name: Check out repository
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: "3.11"
 
-      - name: Install Dependencies
-        run: pip install requests
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
-      - name: Run Heat Risk Script
+      - name: Run heat monitor script
         run: python heat_monitor.py
+        env:
+          OWM_API_KEY: ${{ secrets.OWM_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          HEAT_INDEX_THRESHOLD: "105"
