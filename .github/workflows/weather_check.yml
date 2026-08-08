@@ -1,28 +1,25 @@
-name: Heat Alert Monitor
+name: Negros Oriental Heat Index Bulletin
 
 on:
   schedule:
-    - cron: '*/15 * * * *'  # Runs automatically every 15 minutes
-  workflow_dispatch:        # Allows manual testing button
+    # Runs every 3 hours (Cron syntax in UTC)
+    - cron: '0 */3 * * *'
+  workflow_dispatch: # Allows manual trigger button in GitHub
 
 jobs:
-  run-script:
-    runs-on: ubuntu-latest
+  run-bot:
+    runs-runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.x'
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Install Dependencies
+        run: pip install requests
 
-      - name: Run script
-        env:
-          FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
-        run: python heat_monitor.py
+      - name: Run Heat Risk Script
+        run: python heat_risk_bot.py
