@@ -27,7 +27,7 @@ jobs:
           FIREBASE_CRED_JSON: ${{ secrets.FIREBASE_CRED_JSON }}
 
       - name: Run heat monitor script
-        run: python heat_monitor.py
+        run: python heat_index_alert.py
         env:
           FIREBASE_CRED_PATH: firebase-cred.json
           FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
