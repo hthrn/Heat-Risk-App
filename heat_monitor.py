@@ -1,115 +1,116 @@
+"""
+Negros Oriental Heat Index Monitor
+------------------------------------
+Checks the live heat index for every city and municipality in Negros
+Oriental, Philippines, and posts an alert to a Telegram channel for
+any locality that has reached the configured threshold.
+
+Required environment variables:
+  OWM_API_KEY          -> OpenWeatherMap API key
+  TELEGRAM_BOT_TOKEN   -> Telegram bot token from BotFather
+  TELEGRAM_CHANNEL_ID  -> numeric channel ID, e.g. -1001234567890
+  HEAT_INDEX_THRESHOLD -> optional, defaults to 105 (Fahrenheit)
+
+Install: pip install requests
+"""
+
 import os
+import logging
 import requests
 
-# --- CONFIGURATION VIA ENVIRONMENT VARIABLES ---
-TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
-OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger("negor_heat_monitor")
 
-# Channel handle (e.g., @YourChannelHandle) or numeric Channel ID
-CHANNEL_ID = "-1004327817193" 
+OWM_API_KEY = os.environ["OWM_API_KEY"]
+TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]
+HEAT_INDEX_THRESHOLD = float(os.environ.get("HEAT_INDEX_THRESHOLD", 105))
 
-# Firebase endpoint storing your list of Negros Oriental cities
-FIREBASE_CITIES_URL = "https://heatriskapp-default-rtdb.firebaseio.com/negros_oriental_cities.json"
+OWM_URL = "https://api.openweathermap.org/data/2.5/weather"
+TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
-# Fallback locations if Firebase is empty/unreachable
-FALLBACK_CITIES = ["Dumaguete", "Bais", "Tanjay", "Bayawan", "Guihulngan"]
-
-
-def get_pagasa_heat_tier(heat_index):
-    """
-    Categorizes the heat index (feels_like in °C) according to official PAGASA levels.
-    """
-    if heat_index >= 52.0:
-        return {
-            "level": "☠️ EXTREME DANGER",
-            "advice": "Heat stroke is imminent! Avoid all outdoor physical activity."
-        }
-    elif heat_index >= 42.0:
-        return {
-            "level": "🔴 DANGER",
-            "advice": "Heat cramps and heat exhaustion are likely. Heat stroke is probable with continued exposure. Stay indoors."
-        }
-    elif heat_index >= 33.0:
-        return {
-            "level": "🟠 EXTREME CAUTION",
-            "advice": "Heat cramps and heat exhaustion are possible. Limit direct sun exposure and drink plenty of water."
-        }
-    elif heat_index >= 27.0:
-        return {
-            "level": "🟡 CAUTION",
-            "advice": "Fatigue is possible with prolonged exposure. Stay hydrated throughout the day."
-        }
-    else:
-        return {
-            "level": "🟢 NORMAL / SAFE",
-            "advice": "Heat index is within comfortable safety limits."
-        }
+# 6 component cities + 19 municipalities of Negros Oriental
+NEGROS_ORIENTAL_LGUS = [
+    "Bais,PH", "Bayawan,PH", "Canlaon,PH", "Dumaguete,PH", "Guihulngan,PH", "Tanjay,PH",
+    "Amlan,PH", "Ayungon,PH", "Bacong,PH", "Basay,PH", "Bindoy,PH", "Dauin,PH",
+    "Jimalalud,PH", "La Libertad,PH", "Mabinay,PH", "Manjuyod,PH", "Pamplona,PH",
+    "San Jose,PH", "Santa Catalina,PH", "Siaton,PH", "Sibulan,PH", "Tayasan,PH",
+    "Valencia,PH", "Vallehermoso,PH", "Zamboanguita,PH",
+]
 
 
-def fetch_target_cities():
-    """Fetches list of Negros Oriental cities stored in Firebase Realtime Database."""
+def fetch_weather(city: str):
+    params = {"q": city, "appid": OWM_API_KEY, "units": "imperial"}
     try:
-        response = requests.get(FIREBASE_CITIES_URL, timeout=10)
-        if response.status_code == 200 and response.json():
-            return response.json()
-    except Exception as e:
-        print(f"Error fetching from Firebase: {e}")
-    
-    print("Using fallback city list.")
-    return FALLBACK_CITIES
+        resp = requests.get(OWM_URL, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        return data["main"]["temp"], data["main"]["humidity"]
+    except requests.RequestException as e:
+        log.error(f"Weather fetch failed for '{city}': {e}")
+        return None
+    except (KeyError, ValueError) as e:
+        log.error(f"Unexpected weather response for '{city}': {e}")
+        return None
 
 
-def fetch_weather(city_name):
-    """Queries OpenWeatherMap API for live temperature and heat index in Celsius."""
-    url = f"https://api.openweathermap.org/data/2.5/weather?q={city_name},PH&units=metric&appid={OPENWEATHER_API_KEY}"
+def compute_heat_index(temp_f: float, humidity: float) -> float:
+    T, R = temp_f, humidity
+    if T < 80:
+        return T
+
+    hi = (
+        -42.379 + 2.04901523 * T + 10.14333127 * R
+        - 0.22475541 * T * R - 0.00683783 * T * T
+        - 0.05481717 * R * R + 0.00122874 * T * T * R
+        + 0.00085282 * T * R * R - 0.00000199 * T * T * R * R
+    )
+
+    if R < 13 and 80 <= T <= 112:
+        hi -= ((13 - R) / 4) * ((17 - abs(T - 95)) / 17) ** 0.5
+    if R > 85 and 80 <= T <= 87:
+        hi += ((R - 85) / 10) * ((87 - T) / 5)
+
+    return round(hi, 1)
+
+
+def send_telegram_message(text: str) -> bool:
+    payload = {"chat_id": TELEGRAM_CHANNEL_ID, "text": text}
     try:
-        res = requests.get(url, timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            return {
-                "temp": round(data["main"]["temp"], 1),
-                "heat_index": round(data["main"]["feels_like"], 1)
-            }
-    except Exception as e:
-        print(f"Error fetching weather for {city_name}: {e}")
-    return None
+        resp = requests.post(TELEGRAM_URL, json=payload, timeout=10)
+        resp.raise_for_status()
+        return True
+    except requests.RequestException as e:
+        log.error(f"Telegram send failed: {e}")
+        return False
 
 
-def send_telegram_bulletin(message_text):
-    """Posts formatted bulletin to the Telegram Channel."""
-    telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHANNEL_ID,
-        "text": message_text,
-        "parse_mode": "Markdown"
-    }
-    res = requests.post(telegram_url, json=payload)
-    return res.json()
+def check_lgu(lgu: str):
+    weather = fetch_weather(lgu)
+    if weather is None:
+        return
+
+    temp_f, humidity = weather
+    heat_index = compute_heat_index(temp_f, humidity)
+    town_name = lgu.split(",")[0]
+
+    log.info(f"{town_name}: temp={temp_f}F humidity={humidity}% heat_index={heat_index}F")
+
+    if heat_index >= HEAT_INDEX_THRESHOLD:
+        message = (
+            f"⚠️ Heat Index Alert — {town_name}, Negros Oriental\n"
+            f"Current heat index: {heat_index}°F (threshold: {HEAT_INDEX_THRESHOLD}°F)\n"
+            f"Temperature: {temp_f}°F, Humidity: {humidity}%\n"
+            f"Stay hydrated and avoid prolonged sun exposure."
+        )
+        if send_telegram_message(message):
+            log.info(f"Alert posted for {town_name}.")
 
 
-def run_heat_risk_check():
-    cities = fetch_target_cities()
-    report_lines = ["🌴 *NEGROS ORIENTAL HEAT INDEX BULLETIN* 🇵🇭\n"]
-
-    for city in cities:
-        weather = fetch_weather(city)
-        if weather:
-            temp = weather["temp"]
-            heat_index = weather["heat_index"]
-            tier = get_pagasa_heat_tier(heat_index)
-
-            city_block = (
-                f"📍 *{city}*\n"
-                f"• Actual Temp: `{temp}°C` | Heat Index: `{heat_index}°C`\n"
-                f"• PAGASA Level: {tier['level']}\n"
-                f"• Guidance: _{tier['advice']}_\n"
-            )
-            report_lines.append(city_block)
-
-    full_bulletin = "\n".join(report_lines)
-    res = send_telegram_bulletin(full_bulletin)
-    print("Post result:", res)
+def main():
+    for lgu in NEGROS_ORIENTAL_LGUS:
+        check_lgu(lgu)
 
 
 if __name__ == "__main__":
-    run_heat_risk_check()
+    main()
