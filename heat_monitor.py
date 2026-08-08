@@ -6,7 +6,7 @@ TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY')
 
 # Channel handle (e.g., @YourChannelHandle) or numeric Channel ID
-CHANNEL_ID = "@YOUR_NEGROS_ORIENTAL_CHANNEL" 
+CHANNEL_ID = "-1004327817193" 
 
 # Firebase endpoint storing your list of Negros Oriental cities
 FIREBASE_CITIES_URL = "https://heatriskapp-default-rtdb.firebaseio.com/negros_oriental_cities.json"
