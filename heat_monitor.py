@@ -44,12 +44,22 @@ def main():
         print("No user data found in Firebase.")
         return
 
-    users_data = response.json()
+    data = response.json()
 
-    for chat_id, data in users_data.items():
+    # Handle both nested 'users' structure from App Inventor and root structure
+    users_data = data.get("users", data) if isinstance(data, dict) else data
+
+    for chat_id, user_info in users_data.items():
         try:
-            city = data[0]
-            threshold = float(data[1])
+            # Handle list layout saved from App Inventor [City, Threshold]
+            if isinstance(user_info, list) and len(user_info) >= 2:
+                city = user_info[0]
+                threshold = float(user_info[1])
+            elif isinstance(user_info, dict):
+                city = user_info.get("city")
+                threshold = float(user_info.get("threshold", 0))
+            else:
+                continue
 
             current_temp = get_city_heat_index(city)
             
